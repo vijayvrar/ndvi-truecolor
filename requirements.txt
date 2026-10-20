@@ -4,3 +4,4 @@ odc-stac
 matplotlib
 numpy
 rasterio
+gunicorn
