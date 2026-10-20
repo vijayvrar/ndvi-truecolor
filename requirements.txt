@@ -1,0 +1,6 @@
+flask
+pystac-client
+odc-stac
+matplotlib
+numpy
+rasterio

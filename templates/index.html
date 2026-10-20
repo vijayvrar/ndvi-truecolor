@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel-2 NDVI & RGB Explorer</title>
+    <style>
+        :root {
+            --primary: #2e7d32;
+            --bg-color: #f4f6f8;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            box-sizing: border-box;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.4rem;
+            color: var(--primary);
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        input[type="number"], select {
+            padding: 10px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .row .form-group {
+            flex: 1;
+        }
+
+        button.btn-primary {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        button.btn-primary:hover {
+            background-color: #1b5e20;
+        }
+
+        .slider-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        #year-label {
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: var(--primary);
+        }
+
+        .result-section {
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .map-image {
+            width: 100%;
+            max-width: 500px;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 15px 0;
+            font-weight: bold;
+            color: #666;
+        }
+
+        .error {
+            color: #d32f2f;
+            text-align: center;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Sentinel-2 Time-Series Explorer</h2>
+        
+        <!-- Controls Setup -->
+        <div class="row">
+            <div class="form-group">
+                <label for="lat">Latitude</label>
+                <input type="number" id="lat" step="0.001" value="{{ lat }}">
+            </div>
+            <div class="form-group">
+                <label for="lon">Longitude</label>
+                <input type="number" id="lon" step="0.001" value="{{ lon }}">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="layerSelect">Select View Layer</label>
+            <select id="layerSelect" onchange="changeLayer()">
+                <option value="ndvi">Vegetation Health (NDVI)</option>
+                <option value="rgb">True Color (RGB Satellite Photo)</option>
+            </select>
+        </div>
+
+        <button class="btn-primary" onclick="startExplorer()">Load Location (2026)</button>
+
+        <!-- Time Slider -->
+        <div class="slider-container" id="slider-wrapper" style="display:none;">
+            <label>Timeline Year: <span id="year-label">2026</span></label>
+            <input type="range" id="yearSlider" min="2017" max="2026" value="2026" step="1">
+        </div>
+
+        <!-- Loading & Errors -->
+        <div class="loading" id="loading">Fetching satellite cloud-free data... Please wait.</div>
+        <div class="error" id="errorMsg"></div>
+
+        <!-- Result Image Display -->
+        <div class="result-section" id="result-section">
+            <img id="mapImage" class="map-image" alt="Satellite Visualization Map">
+        </div>
+    </div>
+
+    <script>
+        let cachedMaps = {};
+        let timeout = null;
+
+        async function fetchYear(year) {
+            const layer = document.getElementById('layerSelect').value;
+            const cacheKey = `${year}_${layer}`;
+
+            // Check frontend cache
+            if (cachedMaps[cacheKey]) {
+                updateImageView(cachedMaps[cacheKey]);
+                return;
+            }
+
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('errorMsg').innerText = '';
+            
+            try {
+                let response = await fetch('/get_map_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lat: lat, lon: lon, year: year, layer: layer })
+                });
+                
+                let data = await response.json();
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.error) {
+                    document.getElementById('errorMsg').innerText = data.error;
+                } else {
+                    cachedMaps[cacheKey] = data;
+                    updateImageView(data);
+                }
+            } catch (err) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('errorMsg').innerText = "Failed to connect to backend server.";
+            }
+        }
+
+        function updateImageView(data) {
+            document.getElementById('mapImage').src = data.image;
+            document.getElementById('result-section').style.display = 'block';
+        }
+
+        function changeLayer() {
+            let currentYear = document.getElementById('yearSlider').value;
+            if (document.getElementById('slider-wrapper').style.display === 'block') {
+                fetchYear(currentYear);
+            }
+        }
+
+        function startExplorer() {
+            cachedMaps = {}; // Reset cache on new coordinate load
+            document.getElementById('slider-wrapper').style.display = 'block';
+            document.getElementById('yearSlider').value = 2026;
+            document.getElementById('year-label').innerText = '2026';
+            fetchYear(2026);
+        }
+
+        // Debounced Slider Listener
+        document.getElementById('yearSlider').addEventListener('input', function() {
+            let year = this.value;
+            document.getElementById('year-label').innerText = `${year}`;
+            
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                fetchYear(year);
+            }, 350);
+        });
+    </script>
+</body>
+</html>
